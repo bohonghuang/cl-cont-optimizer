@@ -20,8 +20,10 @@
                                             (setf next-element next-cc)
                                             (funcall return-cc i))))
                        :finally (funcall return-cc nil))))
-          (setf next-element #'next
-                generate (lambda () (call/cc next-element))))
+          (symbol-macrolet ((set-vars
+                              (setf next-element #'next
+                                    generate (lambda () (call/cc next-element)))))
+            set-vars))
         generate))))
 
 (defun make-list-iterator (list)
@@ -30,16 +32,18 @@
       (let ((next-element #'values)
             (generate #'values))
         (declare (type function next-element generate))
-        (flet ((next (return-cc)
-                 (declare (type function return-cc))
-                 (dolist (elem list)
-                   (setf return-cc
-                         (call/cc (lambda (next-cc)
-                                    (setf next-element next-cc)
-                                    (funcall return-cc elem)))))
-                 (funcall return-cc nil)))
-          (setf next-element #'next
-                generate (lambda () (call/cc next-element))))
+        (labels ((next (return-cc)
+                   (declare (type function return-cc))
+                   (dolist (elem list)
+                     (setf return-cc
+                           (call/cc (lambda (next-cc)
+                                      (setf next-element next-cc)
+                                      (funcall return-cc elem)))))
+                   (funcall return-cc nil)))
+          (macrolet ((set-vars ()
+                       `(setf next-element #'next
+                              generate (lambda () (call/cc next-element)))))
+            (set-vars)))
         generate))))
 
 (defun iterator-list (iterator)

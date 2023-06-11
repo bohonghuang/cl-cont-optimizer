@@ -104,8 +104,7 @@
                ,@(let ((*lexcial-functions* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) functions) *lexcial-functions*)))
                    (mapcar (rcurry #'walk env) body)))))))
        (((macrolet symbol-macrolet) definitions &rest body)
-        (declare (ignore definitions body))
-        (error "MACROLET and SYMBOL-MACROLET are not supported inside WITH-CONT-OPTIMIZER yet."))
+        `(,(car form) ,definitions (%with-cont-optimizer (,*lexcial-tags* ,*lexcial-functions* ,*lexcial-blocks*) . ,body)))
        ((multiple-value-call function &rest args)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc
@@ -147,6 +146,11 @@
            `(,(car form) . ,(mapcar (rcurry #'walk env) args)))))))
     (t form)))
 
-(defmacro with-cont-optimizer (&body body &environment env &aux (*subform-has-call/cc-p* nil))
-  (setf body (mapcar (rcurry #'walk env) body))
-  `(cont:with-call/cc . ,body))
+(defmacro %with-cont-optimizer ((tags functions blocks) &body body &environment env &aux (*subform-has-call/cc-p* nil))
+  (let ((*lexcial-tags* tags)
+        (*lexcial-functions* functions)
+        (*lexcial-blocks* blocks))
+    `(cont:with-call/cc . ,(mapcar (rcurry #'walk env) body))))
+
+(defmacro with-cont-optimizer (&body body)
+  `(%with-cont-optimizer (nil nil nil) . ,body))
