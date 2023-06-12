@@ -8,7 +8,7 @@
   :bug-tracker "https://github.com/bohonghuang/cl-cont-optimizer/issues"
   :source-control (:git "https://github.com/bohonghuang/cl-cont-optimizer.git")
   :components ((:file "package"))
-  :depends-on (#:alexandria #:cl-cont)
+  :depends-on (#:alexandria #:cl-cont #:trivial-macroexpand-all)
   :in-order-to ((test-op (test-op #:cl-cont-optimizer/test))))
 
 (defsystem cl-cont-optimizer/test

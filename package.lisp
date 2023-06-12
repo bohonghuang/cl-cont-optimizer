@@ -1,8 +1,10 @@
 (defpackage cl-cont-optimizer
-  (:use #:cl #:alexandria)
-  (:export #:with-cont-optimizer))
+  (:use #:cl #:alexandria #:trivial-macroexpand-all)
+  (:export #:with-cont-optimizer #:*allow-multiple-value-p*))
 
 (in-package #:cl-cont-optimizer)
+
+(defvar +without-call/cc-mark+ (gensym "WITHOUT-CALL/CC"))
 
 (defvar *subform-has-call/cc-p* nil)
 
@@ -12,7 +14,7 @@
 
 (defvar *lexcial-blocks* nil)
 
-(defparameter *multiple-value-enabled-p* nil)
+(defparameter *allow-multiple-value-p* t)
 
 (defmacro with-propagated-subform-call/cc-p (&body body)
   (with-gensyms (pred)
@@ -29,24 +31,22 @@
       `(cont:with-call/cc ,form)
       `(cont:without-call/cc ,form)))
 
+(defmacro without-call/cc-with-mark (&body body)
+  (if *allow-multiple-value-p*
+      `(cont:without-call/cc ,+without-call/cc-mark+ . ,body)
+      `(cont:without-call/cc . ,body)))
+
 (defun optimize-body (forms)
   (loop :with group :and terminator := (gensym)
         :for (form next) :on (nconc forms (list terminator))
-        :if (and (listp form) (eq (car form) 'cont:without-call/cc)
-                 (not (and *multiple-value-enabled-p* (eql next terminator))))
+        :if (and (listp form) (eq (car form) 'cont:without-call/cc))
           :do (push (cdr form) group)
         :else
           :when group
-            :collect `(cont:without-call/cc . ,(reduce #'nconc (nreverse group))) :into groups
+            :collect `(without-call/cc-with-mark . ,(reduce #'nconc (nreverse group))) :into groups
             :and :do (setf group nil)
           :end :and
           :if (eql form terminator)
-            :when *multiple-value-enabled-p*
-              :do (let ((last (lastcar groups)))
-                    (when (and (listp last) (eq (car last) 'cont:without-call/cc))
-                      (setf *subform-has-call/cc-p* t)
-                      (setf groups (nconc (butlast groups) (list (cons 'cont:with-call/cc (cdr last)))))))
-            :end :and
             :return groups
           :else
             :collect form :into groups))
@@ -57,9 +57,12 @@
     (setf form (macroexpand form env)))
   (typecase form
     (cons
+     (when (and (listp (car form)) (eq (caar form) 'lambda))
+       (return-from walk (walk `(funcall . ,form) env)))
      (destructuring-case form
        ((the value-type form) `(the ,value-type ,(walk form env)))
-       (((declare declaim proclaim) &rest args) (declare (ignore args)) form)
+       (((declare declaim proclaim quote) &rest args) (declare (ignore args)) form)
+       ((locally &rest body) `(locally . ,(optimize-body body)))
        (((let let*) bindings &rest body)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc
@@ -70,13 +73,12 @@
                                    :collect `(,binding nil)))
                  (bindings-have-call/cc-p *subform-has-call/cc-p*)
                  (body (optimize-body (mapcar (rcurry #'walk env) body))))
-             (if (and (eq (car form) 'let)
-                      (> (length bindings) 1)
-                      *subform-has-call/cc-p*
+             (if (and *allow-multiple-value-p* *subform-has-call/cc-p*
+                      (eq (car form) 'let) (> (length bindings) 1)
                       (not bindings-have-call/cc-p))
                  `(multiple-value-bind ,(mapcar #'first bindings)
-                      (cont:without-call/cc (values . ,(mapcar #'second bindings)))
-                    @body)
+                      (without-call/cc-with-mark (values . ,(mapcar #'second bindings)))
+                    (locally . ,body))
                  `(,(car form) ,bindings . ,body))))))
        ((function name)
         (with-propagated-subform-call/cc-p
@@ -162,5 +164,29 @@
         (*lexcial-blocks* blocks))
     `(cont:with-call/cc . ,(mapcar (rcurry #'walk env) body))))
 
-(defmacro with-cont-optimizer (&body body)
-  `(%with-cont-optimizer (nil nil nil) . ,body))
+(defun funcall-to-multiple-value-call (form)
+  (typecase form
+    ((and proper-list cons)
+     (destructuring-case form
+       ((funcall function &rest args)
+        (if (and (= (length args) 1)
+                 (listp (car args))
+                 (eq (caar args) 'progn)
+                 (eql (cadar args) +without-call/cc-mark+))
+            `(multiple-value-call . ,(mapcar #'funcall-to-multiple-value-call (cons function args)))
+            `(funcall . ,(mapcar #'funcall-to-multiple-value-call (cons function args)))))
+       ((t &rest args) (declare (ignore args))
+        (mapcar #'funcall-to-multiple-value-call form))))
+    (t form)))
+
+(defmacro with-cont-optimizer (&body body &environment env)
+  (when *allow-multiple-value-p*
+    (multiple-value-bind (form supportp)
+        (macroexpand-all `(%with-cont-optimizer (nil nil nil) . ,body) #-ecl env)
+      (if supportp
+          (setf body `(symbol-macrolet ((,+without-call/cc-mark+ nil))
+                        ,(funcall-to-multiple-value-call form)))
+          (setf *allow-multiple-value-p* nil))))
+  (unless *allow-multiple-value-p*
+    (setf body `(%with-cont-optimizer (nil nil nil) . ,body)))
+  (values body))
