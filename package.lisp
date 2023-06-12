@@ -14,6 +14,8 @@
 
 (defvar *lexcial-blocks* nil)
 
+(defvar *top-level-optimizer-p* t)
+
 (defparameter *allow-multiple-value-p* t)
 
 (defmacro with-propagated-subform-call/cc-p (&body body)
@@ -25,6 +27,9 @@
                (setf ,pred *subform-has-call/cc-p*)))
          (unless *subform-has-call/cc-p*
            (setf *subform-has-call/cc-p* ,pred))))))
+
+(defmacro with-protected-subform-call/cc-p (&body body)
+  `(let ((*subform-has-call/cc-p* nil)) . ,body))
 
 (defun conditional-call/cc (form)
   (if *subform-has-call/cc-p*
@@ -141,7 +146,7 @@
             (setf *subform-has-call/cc-p* t))
           (conditional-call/cc form)))
        ((lambda args &rest body)
-        (with-propagated-subform-call/cc-p
+        (with-protected-subform-call/cc-p
           (conditional-call/cc
            `(lambda ,args . ,(optimize-body (mapcar (rcurry #'walk env) body))))))
        ((cont:call/cc function)
@@ -160,10 +165,13 @@
     (t form)))
 
 (defmacro %with-cont-optimizer ((tags functions blocks) &body body &environment env &aux (*subform-has-call/cc-p* nil))
-  (let ((*lexcial-tags* tags)
-        (*lexcial-functions* functions)
-        (*lexcial-blocks* blocks))
-    `(cont:with-call/cc . ,(mapcar (rcurry #'walk env) body))))
+  (if *top-level-optimizer-p*
+      (let ((*top-level-optimizer-p* nil)
+            (*lexcial-tags* tags)
+            (*lexcial-functions* functions)
+            (*lexcial-blocks* blocks))
+        `(cont:with-call/cc . ,(mapcar (rcurry #'walk env) body)))
+      `(progn . ,body)))
 
 (defun funcall-to-multiple-value-call (form)
   (typecase form
@@ -181,13 +189,16 @@
     (t form)))
 
 (defmacro with-cont-optimizer (&body body &environment env)
-  (when *allow-multiple-value-p*
-    (multiple-value-bind (form supportp)
-        (macroexpand-all `(%with-cont-optimizer (nil nil nil) . ,body) #-ecl env)
-      (if supportp
-          (setf body `(symbol-macrolet ((,+without-call/cc-mark+ nil))
-                        ,(funcall-to-multiple-value-call form)))
-          (setf *allow-multiple-value-p* nil))))
-  (unless *allow-multiple-value-p*
-    (setf body `(%with-cont-optimizer (nil nil nil) . ,body)))
+  (if *top-level-optimizer-p*
+      (progn
+        (when *allow-multiple-value-p*
+          (multiple-value-bind (form supportp)
+              (macroexpand-all `(%with-cont-optimizer (nil nil nil) . ,body) #-ecl env)
+            (if supportp
+                (setf body `(symbol-macrolet ((,+without-call/cc-mark+ nil))
+                              ,(funcall-to-multiple-value-call form)))
+                (setf *allow-multiple-value-p* nil))))
+        (unless *allow-multiple-value-p*
+          (setf body `(%with-cont-optimizer (nil nil nil) . ,body))))
+      (setf body `(progn . ,body)))
   (values body))

@@ -68,10 +68,12 @@
   (with-cont-optimizer
     (with-call/cc
       (let ((a 1) (b 2) (c 3))
-        (call/cc #'values)
-        (multiple-value-bind (a b c)
-            ((lambda () (values a b c)))
-          (values-list (nconc (multiple-value-list (values a b c)) values)))))))
+        (setf (values a b c)
+              (multiple-value-bind (a b c)
+                  ((lambda () (values a b c)))
+                (call/cc #'values)
+                (values-list (nconc (multiple-value-list (values a b c)) values))))
+        (values a b c)))))
 
 (defmacro skip-if (pred desc &body tests)
   (let ((thunk (gensym "THUNK")))
