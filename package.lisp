@@ -63,18 +63,28 @@
        (((let let*) bindings &rest body)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc
-           `(,(car form)
-             ,(loop :for binding :in bindings
-                    :if (listp binding)
-                      :collect `(,(first binding) ,(walk (second binding) env))
-                    :else
-                      :collect binding)
-             . ,(optimize-body (mapcar (rcurry #'walk env) body))))))
+           (let ((bindings (loop :for binding :in bindings
+                                 :if (listp binding)
+                                   :collect `(,(first binding) ,(walk (second binding) env))
+                                 :else
+                                   :collect `(,binding nil)))
+                 (bindings-have-call/cc-p *subform-has-call/cc-p*)
+                 (body (optimize-body (mapcar (rcurry #'walk env) body))))
+             (if (and (eq (car form) 'let)
+                      (> (length bindings) 1)
+                      *subform-has-call/cc-p*
+                      (not bindings-have-call/cc-p))
+                 `(multiple-value-bind ,(mapcar #'first bindings)
+                      (cont:without-call/cc (values . ,(mapcar #'second bindings)))
+                    @body)
+                 `(,(car form) ,bindings . ,body))))))
        ((function name)
         (with-propagated-subform-call/cc-p
-          (when (assoc-value *lexcial-functions* name)
-            (setf *subform-has-call/cc-p* t))
-          (conditional-call/cc form)))
+          (cond
+            ((assoc-value *lexcial-functions* name)
+             (setf *subform-has-call/cc-p* t) `(function ,name))
+            ((and (listp name) (eq (car name) 'lambda)) (walk name env))
+            (t `(function ,name)))))
        ((block name &rest body)
         (with-propagated-subform-call/cc-p
           (mapc (rcurry #'walk env) body)
