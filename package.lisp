@@ -52,9 +52,10 @@
             :collect form :into groups))
 
 (defun walk (form &optional env)
-  (when (or (and (listp form) (not (member (car form) '(cont:with-call/cc cont:without-call/cc lambda))))
-            (not (listp form)))
-    (setf form (macroexpand form env)))
+  (loop :while (or (and (listp form) (not (member (car form) '(cont:with-call/cc cont:without-call/cc lambda))))
+                   (not (listp form)))
+        :while (multiple-value-bind (expanded expandedp) (macroexpand-1 form env)
+                 (when expandedp (setf form expanded))))
   (typecase form
     (cons
      (when (and (listp (car form)) (eq (caar form) 'lambda))
