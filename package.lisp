@@ -139,7 +139,7 @@
           (with-propagated-subform-call/cc-p
             (mapc (rcurry #'walk env) body)
             (let ((*lexcial-tags* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) tags) *lexcial-tags*)))
-              (conditional-call/cc `(tagbody . ,(optimize-body (mapcar (rcurry #'walk env) body))))))))
+              (conditional-call/cc `(tagbody . ,(remove-if #'null (optimize-body (mapcar (rcurry #'walk env) body)))))))))
        ((go tag)
         (with-propagated-subform-call/cc-p
           (when (assoc-value *lexcial-tags* tag)
