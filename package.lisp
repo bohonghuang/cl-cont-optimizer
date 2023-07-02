@@ -105,7 +105,9 @@
         (with-propagated-subform-call/cc-p
           (when (assoc-value *lexcial-blocks* name)
             (setf *subform-has-call/cc-p* t))
-          (conditional-call/cc `(return-from ,name ,(walk result env)))))
+          (conditional-call/cc `(return-from ,name ,(with-propagated-subform-call/cc-p
+                                                      (let ((form (walk result env)))
+                                                        (if *subform-has-call/cc-p* form `(without-call/cc-with-mark ,form))))))))
        (((flet labels) definitions &rest body)
         (with-propagated-subform-call/cc-p
           (let ((functions (loop :for (name args . body) :in definitions
