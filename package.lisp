@@ -43,7 +43,7 @@
 
 (defun optimize-body (forms)
   (loop :with group :and terminator := (gensym)
-        :for (form next) :on (nconc forms (list terminator))
+        :for (form next) :on (append forms (list terminator))
         :if (and (listp form) (eq (car form) 'cont:without-call/cc))
           :do (push (cdr form) group)
         :else
@@ -68,7 +68,9 @@
      (destructuring-case form
        ((the value-type form) `(the ,value-type ,(walk form env)))
        (((declare declaim proclaim quote) &rest args) (declare (ignore args)) form)
-       ((locally &rest body) `(locally . ,(optimize-body body)))
+       ((locally &rest body) (with-propagated-subform-call/cc-p
+                               (conditional-call/cc
+                                `(locally . ,(optimize-body body)))))
        (((let let*) bindings &rest body)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc
@@ -119,8 +121,10 @@
                                                           *lexcial-functions*)
                       :for (name args . body) :in definitions
                       :collect `(,name ,args . ,(optimize-body (mapcar (rcurry #'walk env) body))))
-               ,@(let ((*lexcial-functions* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) functions) *lexcial-functions*)))
-                   (mapcar (rcurry #'walk env) body)))))))
+               ,@(progn
+                   (mapc (rcurry #'walk env) body)
+                   (let ((*lexcial-functions* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) functions) *lexcial-functions*)))
+                     (mapcar (rcurry #'walk env) body))))))))
        (((macrolet symbol-macrolet) definitions &rest body)
         `(,(car form) ,definitions (%with-cont-optimizer (,*lexcial-tags* ,*lexcial-functions* ,*lexcial-blocks*) . ,body)))
        ((multiple-value-call function &rest args)
