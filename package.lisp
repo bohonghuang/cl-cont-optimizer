@@ -31,10 +31,18 @@
 (defmacro with-protected-subform-call/cc-p (&body body)
   `(let ((*subform-has-call/cc-p* nil)) . ,body))
 
-(defun conditional-call/cc (form)
+(defun conditional-call/cc (form &optional (unexpanded-form form))
   (if *subform-has-call/cc-p*
       `(cont:with-call/cc ,form)
-      `(cont:without-call/cc ,form)))
+      `(cont:without-call/cc ,(if (eq form unexpanded-form)
+                                  unexpanded-form
+                                  (block form
+                                    (subst-if 'nil
+                                              (lambda (atom)
+                                                (when (eq atom 'cont:with-call/cc)
+                                                  (return-from form form)))
+                                              form)
+                                    unexpanded-form)))))
 
 (defmacro without-call/cc-with-mark (&body body)
   (if *allow-multiple-value-p*
@@ -167,7 +175,8 @@
           (when (assoc-value *lexcial-functions* (car form))
             (setf *subform-has-call/cc-p* t))
           (conditional-call/cc
-           `(,(car form) . ,(mapcar (rcurry #'walk env) args)))))))
+           `(,(car form) . ,(mapcar (rcurry #'walk env) args))
+           form)))))
     (t form)))
 
 (defmacro %with-cont-optimizer ((tags functions blocks) &body body &environment env &aux (*subform-has-call/cc-p* nil))
@@ -179,20 +188,47 @@
         `(cont:with-call/cc . ,(mapcar (rcurry #'walk env) body)))
       `(progn . ,body)))
 
+(defvar *subform-modified-p* nil)
+
+(defmacro with-propagated-subform-modified-p (&body body)
+  (with-gensyms (pred)
+    `(let ((,pred nil))
+       (multiple-value-prog1
+           (let ((*subform-modified-p* nil))
+             (multiple-value-prog1 (progn . ,body)
+               (setf ,pred *subform-modified-p*)))
+         (unless *subform-modified-p*
+           (setf *subform-modified-p* ,pred))))))
+
+(defmacro with-protected-subform-modified-p (&body body)
+  `(let ((*subform-modified-p* nil)) . ,body))
+
+(defun conditional-modified-form (form &optional (unmodified-form form))
+  (if *subform-modified-p* form unmodified-form))
+
 (defun funcall-to-multiple-value-call (form)
-  (typecase form
-    ((and proper-list cons)
-     (destructuring-case form
-       ((funcall function &rest args)
-        (if (and (= (length args) 1)
-                 (listp (car args))
-                 (eq (caar args) 'progn)
-                 (eql (cadar args) +without-call/cc-mark+))
-            `(multiple-value-call . ,(mapcar #'funcall-to-multiple-value-call (cons function args)))
-            `(funcall . ,(mapcar #'funcall-to-multiple-value-call (cons function args)))))
-       ((t &rest args) (declare (ignore args))
-        (mapcar #'funcall-to-multiple-value-call form))))
-    (t form)))
+  (labels ((funcall-to-multiple-value-call (form)
+             (with-propagated-subform-modified-p
+               (conditional-modified-form
+                (typecase form
+                  ((and proper-list cons)
+                   (destructuring-case form
+                     ((funcall function &rest args)
+                      (if (and (= (length args) 1)
+                               (loop :for arg := (car args) :then (cadr arg)
+                                     :while (listp arg)
+                                     :while (member (car arg) '(progn locally))
+                                     :when (eq (cadr arg) +without-call/cc-mark+)
+                                       :return t))
+                          (progn
+                            (setf *subform-modified-p* t)
+                            `(multiple-value-call . ,(mapcar #'funcall-to-multiple-value-call (cons function args))))
+                          `(funcall . ,(mapcar #'funcall-to-multiple-value-call (cons function args)))))
+                     ((t &rest args) (declare (ignore args))
+                      (mapcar #'funcall-to-multiple-value-call form))))
+                  (t form))
+                form))))
+    (with-protected-subform-modified-p (funcall-to-multiple-value-call form))))
 
 (defmacro with-cont-optimizer (&body body &environment env)
   (if *top-level-optimizer-p*
