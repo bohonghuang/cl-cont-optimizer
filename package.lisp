@@ -109,7 +109,7 @@
           (conditional-call/cc
            `(block ,name . ,(let ((*lexcial-blocks* (acons name *subform-has-call/cc-p* *lexcial-blocks*)))
                               (optimize-body (mapcar (rcurry #'walk env) body)))))))
-       ((return-from name result)
+       ((return-from name &optional result)
         (with-propagated-subform-call/cc-p
           (when (assoc-value *lexcial-blocks* name)
             (setf *subform-has-call/cc-p* t))
