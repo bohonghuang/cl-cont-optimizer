@@ -64,6 +64,11 @@
           :else
             :collect form :into groups))
 
+(defun propagate-funcall-function-has-call/cc-p (function)
+  (when (and (listp function) (eq (car function) 'cont:with-call/cc))
+    (setf *subform-has-call/cc-p* t))
+  function)
+
 (defun walk (form &optional env)
   (loop :while (or (and (listp form) (not (member (car form) '(cont:with-call/cc cont:without-call/cc lambda))))
                    (not (listp form)))
@@ -146,10 +151,18 @@
           (unless environmentp
             (warn "Current implementation does not support the ENVIRONMENT parameter of ~A, therefore CL-CONT-OPTIMIZER may not produce accurate optimization results for ~A." 'macroexpand-all (car form))))
         `(,(car form) ,definitions (%with-cont-optimizer (,*lexcial-tags* ,*lexcial-functions* ,*lexcial-blocks*) (locally . ,body))))
-       ((multiple-value-call function &rest args)
+       (((funcall multiple-value-call) function &rest args)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc
-           `(multiple-value-call ,(walk function env) . ,(mapcar (rcurry #'walk env) args)))))
+           `(,(car form) ,(propagate-funcall-function-has-call/cc-p (walk function env))
+             . ,(mapcar (compose
+                         (ecase (car form)
+                           (multiple-value-call (lambda (form)
+                                                  (if (and (listp form) (eq (car form) 'cont:without-call/cc))
+                                                      `(progn . ,(cdr form)) form)))
+                           (funcall #'identity))
+                         (rcurry #'walk env))
+                        args)))))
        ((cont:with-call/cc &rest body)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc

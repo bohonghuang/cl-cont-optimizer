@@ -56,6 +56,13 @@
 
 (defvar *test-list* nil)
 
+(define-test simple :parent suite
+  (let ((continuation nil))
+    (with-cont-optimizer
+      (with-call/cc
+        (1+ (cont:call/cc (lambda (cc) (setf continuation cc))))))
+    (is = 3 (funcall continuation 2))))
+
 (define-test index-generator :parent suite
   (let ((expected (loop :for i :from 1 :to 100 :collect i)))
     (is equal expected (setf *test-list* (iterator-list (make-index-generator 1 100))))))
@@ -65,15 +72,13 @@
     (is equal *test-list* (iterator-list iterator))))
 
 (defun values-123 (&rest values)
-  (with-cont-optimizer
-    (with-call/cc
-      (let ((a 1) (b 2) (c 3))
-        (setf (values a b c)
-              (multiple-value-bind (a b c)
-                  ((lambda () (values a b c)))
-                (call/cc #'values)
-                (values-list (nconc (multiple-value-list (values a b c)) values))))
-        (values a b c)))))
+  (let ((continuation nil))
+    (with-cont-optimizer
+      (with-call/cc
+        (multiple-value-bind (a b c) (values 1 2 3)
+          (call/cc (lambda (cc) (setf continuation cc)))
+          (values-list (nconc (multiple-value-list (call/cc (lambda (cc) (funcall cc a b c)))) values)))))
+    continuation))
 
 (defmacro skip-if (pred desc &body tests)
   (let ((thunk (gensym "THUNK")))
