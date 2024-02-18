@@ -8,46 +8,46 @@
 (defun make-index-generator (from &optional to)
   (#-ecl progn #+ecl si:compiler-let #+ecl ((*allow-multiple-value-p* nil))
    ;; The MACROEXPAND-ALL in ECL doesn't expand SYMBOL-MACROLET and MACROLET.
-    (with-cont-optimizer
-      (with-call/cc
-        (let ((next-element #'values)
-              (generate #'values))
-          (declare (type function next-element generate))
-          (flet ((next (return-cc)
-                   (declare (type function return-cc))
-                   (loop :for i :from from
-                         :until (and to (> i to))
-                         :do (setf return-cc
-                                   (call/cc (lambda (next-cc)
-                                              (setf next-element next-cc)
-                                              (funcall return-cc i))))
-                         :finally (funcall return-cc nil))))
-            (symbol-macrolet ((set-vars
-                                (setf next-element #'next
-                                      generate (lambda () (call/cc next-element)))))
-              set-vars))
-          generate)))))
+   (with-cont-optimizer
+     (with-call/cc
+       (let ((next-element #'values)
+             (generate #'values))
+         (declare (type function next-element generate))
+         (flet ((next (return-cc)
+                  (declare (type function return-cc))
+                  (loop :for i :from from
+                        :until (and to (> i to))
+                        :do (setf return-cc
+                                  (call/cc (lambda (next-cc)
+                                             (setf next-element next-cc)
+                                             (funcall return-cc i))))
+                        :finally (funcall return-cc nil))))
+           (symbol-macrolet ((set-vars
+                               (setf next-element #'next
+                                     generate (lambda () (call/cc next-element)))))
+             set-vars))
+         generate)))))
 
 (defun make-list-iterator (list)
   (#-ecl progn #+ecl si:compiler-let #+ecl ((*allow-multiple-value-p* nil))
-    (with-cont-optimizer
-      (with-call/cc
-        (let ((next-element #'values)
-              (generate #'values))
-          (declare (type function next-element generate))
-          (labels ((next (return-cc)
-                     (declare (type function return-cc))
-                     (dolist (elem list)
-                       (setf return-cc
-                             (call/cc (lambda (next-cc)
-                                        (setf next-element next-cc)
-                                        (funcall return-cc elem)))))
-                     (funcall return-cc nil)))
-            (macrolet ((set-vars ()
-                         `(setf next-element #'next
-                                generate (lambda () (call/cc next-element)))))
-              (set-vars)))
-          generate)))))
+   (with-cont-optimizer
+     (with-call/cc
+       (let ((next-element #'values)
+             (generate #'values))
+         (declare (type function next-element generate))
+         (labels ((next (return-cc)
+                    (declare (type function return-cc))
+                    (dolist (elem list)
+                      (setf return-cc
+                            (call/cc (lambda (next-cc)
+                                       (setf next-element next-cc)
+                                       (funcall return-cc elem)))))
+                    (funcall return-cc nil)))
+           (macrolet ((set-vars ()
+                        `(setf next-element #'next
+                               generate (lambda () (call/cc next-element)))))
+             (set-vars)))
+         generate)))))
 
 (defun iterator-list (iterator)
   (loop :for item := (funcall iterator)
@@ -75,9 +75,17 @@
   (let ((continuation nil))
     (with-cont-optimizer
       (with-call/cc
-        (multiple-value-bind (a b c) (values 1 2 3)
+        (multiple-value-bind (a b c) (values nil nil 3)
+          (multiple-value-call
+              (lambda (va vb vc)
+                (setf a (or a va)
+                      b (or b vb)
+                      c (or c vc)))
+            (values 1) (values 2 3))
           (call/cc (lambda (cc) (setf continuation cc)))
-          (values-list (nconc (multiple-value-list (call/cc (lambda (cc) (funcall cc a b c)))) values)))))
+          (multiple-value-call #'values
+            (call/cc (lambda (cc) (funcall cc a b c)))
+            (values-list values)))))
     continuation))
 
 (defmacro skip-if (pred desc &body tests)
