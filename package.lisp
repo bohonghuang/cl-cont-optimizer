@@ -136,7 +136,7 @@
                    (let ((*lexcial-functions* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) functions) *lexcial-functions*)))
                      (mapcar (rcurry #'walk env) body))))))))
        (((macrolet symbol-macrolet) definitions &rest body)
-        `(,(car form) ,definitions (%with-cont-optimizer (,*lexcial-tags* ,*lexcial-functions* ,*lexcial-blocks*) . ,body)))
+        `(,(car form) ,definitions (%with-cont-optimizer (,*lexcial-tags* ,*lexcial-functions* ,*lexcial-blocks*) (locally . ,body))))
        ((multiple-value-call function &rest args)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc
