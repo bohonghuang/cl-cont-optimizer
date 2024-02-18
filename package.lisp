@@ -137,6 +137,14 @@
                    (let ((*lexcial-functions* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) functions) *lexcial-functions*)))
                      (mapcar (rcurry #'walk env) body))))))))
        (((macrolet symbol-macrolet) definitions &rest body)
+        (multiple-value-bind (expanded supportp environmentp)
+            (ignore-errors (macroexpand-all `(,(car form) ,definitions (%%with-cont-optimizer (locally . ,body))) env))
+          (declare (ignore expanded))
+          (unless supportp
+            (setf *subform-has-call/cc-p* t)
+            (warn "CL-CONT-OPTIMIZER cannot optimize ~A because current implementation does not support ~A." (car form) 'macroexpand-all))
+          (unless environmentp
+            (warn "Current implementation does not support the ENVIRONMENT parameter of ~A, therefore CL-CONT-OPTIMIZER may not produce accurate optimization results for ~A." 'macroexpand-all (car form))))
         `(,(car form) ,definitions (%with-cont-optimizer (,*lexcial-tags* ,*lexcial-functions* ,*lexcial-blocks*) (locally . ,body))))
        ((multiple-value-call function &rest args)
         (with-propagated-subform-call/cc-p
@@ -180,13 +188,16 @@
            form)))))
     (t form)))
 
+(defmacro %%with-cont-optimizer (&body body &environment env)
+  `(cont:with-call/cc . ,(mapcar (rcurry #'walk env) body)))
+
 (defmacro %with-cont-optimizer ((tags functions blocks) &body body &environment env &aux (*subform-has-call/cc-p* nil))
   (if *top-level-optimizer-p*
       (let ((*top-level-optimizer-p* nil)
             (*lexcial-tags* tags)
             (*lexcial-functions* functions)
             (*lexcial-blocks* blocks))
-        `(cont:with-call/cc . ,(mapcar (rcurry #'walk env) body)))
+        (funcall (macro-function '%%with-cont-optimizer) `(%%with-cont-optimizer . ,body) env))
       `(progn . ,body)))
 
 (defvar *subform-modified-p* nil)
@@ -240,7 +251,9 @@
             (if supportp
                 (setf body `(symbol-macrolet ((,+without-call/cc-mark+ nil))
                               ,(funcall-to-multiple-value-call form)))
-                (setf *allow-multiple-value-p* nil))))
+                (progn
+                  (warn "The current Lisp implementation does not support MACROEXPAND-ALL, therefore CL-CONT-OPTIMIZER may discard return values other than the first one.")
+                  (setf *allow-multiple-value-p* nil)))))
         (unless *allow-multiple-value-p*
           (setf body `(%with-cont-optimizer (nil nil nil) . ,body))))
       (setf body `(progn . ,body)))
