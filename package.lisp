@@ -76,9 +76,10 @@
      (destructuring-case form
        ((the value-type form) `(the ,value-type ,(walk form env)))
        (((declare declaim proclaim quote) &rest args) (declare (ignore args)) form)
-       ((locally &rest body) (with-propagated-subform-call/cc-p
-                               (conditional-call/cc
-                                `(locally . ,(optimize-body body)))))
+       ((locally &rest body)
+        (with-propagated-subform-call/cc-p
+          (conditional-call/cc
+           `(locally . ,(optimize-body (mapcar (rcurry #'walk env) body))))))
        (((let let*) bindings &rest body)
         (with-propagated-subform-call/cc-p
           (conditional-call/cc
