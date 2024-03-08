@@ -111,10 +111,12 @@
             (t `(function ,name)))))
        ((block name &rest body)
         (with-propagated-subform-call/cc-p
-          (mapc (rcurry #'walk env) body)
-          (conditional-call/cc
-           `(block ,name . ,(let ((*lexcial-blocks* (acons name *subform-has-call/cc-p* *lexcial-blocks*)))
-                              (optimize-body (mapcar (rcurry #'walk env) body)))))))
+          (macrolet ((with-lexical-blocks (&body body)
+                       `(let ((*lexcial-blocks* (acons name *subform-has-call/cc-p* *lexcial-blocks*)))
+                          ,@body)))
+            (with-lexical-blocks (mapc (rcurry #'walk env) body))
+            (conditional-call/cc
+             `(block ,name . ,(with-lexical-blocks (optimize-body (mapcar (rcurry #'walk env) body))))))))
        ((return-from name &optional result)
         (with-propagated-subform-call/cc-p
           (when (assoc-value *lexcial-blocks* name)
@@ -173,9 +175,11 @@
                           :when (symbolp form)
                             :collect form)))
           (with-propagated-subform-call/cc-p
-            (mapc (rcurry #'walk env) body)
-            (let ((*lexcial-tags* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) tags) *lexcial-tags*)))
-              (conditional-call/cc `(tagbody . ,(remove-if #'null (optimize-body (mapcar (rcurry #'walk env) body)))))))))
+            (macrolet ((with-lexical-tags (&body body)
+                         `(let ((*lexcial-tags* (nconc (mapcar (rcurry #'cons *subform-has-call/cc-p*) tags) *lexcial-tags*)))
+                            ,@body)))
+              (with-lexical-tags (mapc (rcurry #'walk env) body))
+              (with-lexical-tags (conditional-call/cc `(tagbody . ,(remove-if #'null (optimize-body (mapcar (rcurry #'walk env) body))))))))))
        ((go tag)
         (with-propagated-subform-call/cc-p
           (when (assoc-value *lexcial-tags* tag)
