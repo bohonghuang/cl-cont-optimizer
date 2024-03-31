@@ -264,7 +264,15 @@
       (progn
         (when *allow-multiple-value-p*
           (multiple-value-bind (form supportp)
-              (macroexpand-all `(%with-cont-optimizer (nil nil nil) . ,body) #-ecl env)
+              (macroexpand-all
+               `(%with-cont-optimizer (nil nil nil) . ,body)
+               #-(or ecl sbcl) env
+               #+sbcl #.(if (string= (lisp-implementation-version) "2.4.3")
+                            '(when env
+                              (sb-c::make-lexenv
+                               :policy (sb-c::process-optimize-decl '(optimize (sb-c:jump-table 0)) (sb-c::lexenv-policy env))
+                               :default env))
+                            'env))
             (if supportp
                 (setf body `(symbol-macrolet ((,+without-call/cc-mark+ nil))
                               ,(funcall-to-multiple-value-call form)))
