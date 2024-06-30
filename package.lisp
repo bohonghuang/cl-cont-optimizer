@@ -131,12 +131,7 @@
                                  :collect name)))
             (conditional-call/cc
              `(,(car form)
-               ,(loop :with *lexcial-functions* := (nconc (mapcar (rcurry
-                                                                   #'cons
-                                                                   (and (eq (car form) 'labels)
-                                                                        *subform-has-call/cc-p*))
-                                                                  functions)
-                                                          *lexcial-functions*)
+               ,(loop :with *lexcial-functions* := (nconc (mapcar (rcurry #'cons (eq (car form) 'labels)) functions) *lexcial-functions*)
                       :for (name args . body) :in definitions
                       :collect `(,name ,args . ,(optimize-body (mapcar (rcurry #'walk env) body))))
                ,@(progn
